@@ -8,7 +8,13 @@ from src.constants import (
 from src.button import Button
 from src.game_state import GameState
 from src.utils import load_image
-from src.screens import draw_start_screen, draw_game_over_screen, draw_message
+from src.screens import (
+    draw_start_screen,
+    draw_game_over_screen,
+    draw_message,
+    draw_options_screen,
+    get_key_name
+)
 from src.game_data import (
     get_monster_info, get_sword_info, get_item_info,
     get_monster_description, get_sword_description, get_defeat_message
@@ -48,19 +54,33 @@ player_img = load_image('Player.png')
 chest_img = load_image('Chest.png')
 door_img = load_image('Door.png')
 floor_img = load_image('Floor.png')
+wall_img = load_image('Wall.png')
+button_img = load_image('Button.png')
 
 # Create buttons
 try_again_button = Button(WINDOW_SIZE // 2 - 100, WINDOW_SIZE // 2 + 50, 200, 50, "Try Again", GRAY)
 exit_button = Button(WINDOW_SIZE // 2 - 100, WINDOW_SIZE // 2 + 120, 200, 50, "Exit", GRAY)
 start_button = Button(WINDOW_SIZE // 2 - 100, WINDOW_SIZE // 2 + 50, 200, 50, "Start Game", GRAY)
 upload_button = Button(WINDOW_SIZE // 2 - 100, WINDOW_SIZE // 2 + 120, 200, 50, "Upload Character", GRAY)
+options_button = Button(WINDOW_SIZE // 2 - 100, WINDOW_SIZE // 2 + 190, 200, 50, "Options", GRAY)
 
-# Create game state
+# Options screen buttons
+back_button = Button(0, 0, 120, 30, "Back", GRAY)
+volume_up_button = Button(0, 0, 30, 30, "+", GRAY)
+volume_down_button = Button(0, 0, 30, 30, "-", GRAY)
+
+# Key mapping buttons
+key_buttons = [
+    Button(0, 0, 160, 35, "Up: W", GRAY),
+    Button(0, 0, 160, 35, "Down: S", GRAY),
+    Button(0, 0, 160, 35, "Left: A", GRAY),
+    Button(0, 0, 160, 35, "Right: D", GRAY)
+]
+
+# Initialize game state
 game_state = GameState()
-
-# Game loop
-running = True
-clock = pygame.time.Clock()
+game_state.show_options = False
+game_state.remapping_key = None
 
 def handle_image_upload():
     try:
@@ -91,13 +111,43 @@ def handle_image_upload():
         game_state.show_message("Error loading custom image. Using default character.")
         game_state.message_timer = 2000
 
+def handle_key_remap(event):
+    if game_state.remapping_key:
+        if event.key != pygame.K_ESCAPE:  # Don't allow ESC key
+            game_state.remap_key(game_state.remapping_key, event.key)
+            # Update button text
+            key_name = get_key_name(event.key)
+            for button in key_buttons:
+                if button.text.startswith(game_state.remapping_key.capitalize()):
+                    button.text = f"{game_state.remapping_key.capitalize()}: {key_name}"
+                    break
+        game_state.remapping_key = None
+
+# Main game loop
+running = True
+clock = pygame.time.Clock()
+
 while running:
     # Handle events
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if game_state.game_started:
+            if game_state.show_options:
+                if back_button.is_clicked(event.pos):
+                    game_state.show_options = False
+                elif volume_up_button.is_clicked(event.pos):
+                    game_state.set_volume(min(1.0, game_state.volume + 0.1))
+                elif volume_down_button.is_clicked(event.pos):
+                    game_state.set_volume(max(0.0, game_state.volume - 0.1))
+                else:
+                    # Check key mapping buttons
+                    for i, button in enumerate(key_buttons):
+                        if button.is_clicked(event.pos):
+                            game_state.remapping_key = ['up', 'down', 'left', 'right'][i]
+                            button.text = f"{game_state.remapping_key.capitalize()}: Press any key..."
+                            break
+            elif game_state.game_started:
                 if game_state.game_over:
                     if try_again_button.is_clicked(event.pos):
                         game_state.reset_game()
@@ -108,36 +158,37 @@ while running:
                     game_state.game_started = True
                 elif upload_button.is_clicked(event.pos):
                     handle_image_upload()
+                elif options_button.is_clicked(event.pos):
+                    game_state.show_options = True
+        elif event.type == pygame.KEYDOWN and game_state.remapping_key:
+            handle_key_remap(event)
     
-    # Clear screen with floor tiles
-    for x in range(GRID_SIZE):
-        for y in range(GRID_SIZE):
-            if floor_img:
-                screen.blit(floor_img, (x * CELL_SIZE, y * CELL_SIZE))
-            else:
-                pygame.draw.rect(screen, WHITE, (x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE))
-    
-    if not game_state.game_started:
-        draw_start_screen(screen, start_button, upload_button, title_font, controls_font)
-    elif not game_state.game_over:
-        # Handle player movement
+    # Clear screen
+    screen.fill(WHITE)
+
+    if game_state.show_options:
+        draw_options_screen(screen, back_button, volume_up_button, volume_down_button, key_buttons, title_font, message_font, game_state.volume, floor_img)
+    elif not game_state.game_started:
+        draw_start_screen(screen, start_button, upload_button, options_button, title_font, controls_font, floor_img)
+    elif game_state.game_over:
+        draw_game_over_screen(screen, game_state.victory, try_again_button, exit_button, floor_img, title_font, message_font)
+    else:
+        # Handle player movement with remapped keys
         keys = pygame.key.get_pressed()
-        
-        # Check each movement key
-        if keys[pygame.K_w] and not game_state.prev_keys[pygame.K_w] and game_state.player_y > 0:
-            game_state.player_y -= 1
-        if keys[pygame.K_s] and not game_state.prev_keys[pygame.K_s] and game_state.player_y < GRID_SIZE - 1:
-            game_state.player_y += 1
-        if keys[pygame.K_a] and not game_state.prev_keys[pygame.K_a] and game_state.player_x > 0:
-            game_state.player_x -= 1
-        if keys[pygame.K_d] and not game_state.prev_keys[pygame.K_d] and game_state.player_x < GRID_SIZE - 1:
-            game_state.player_x += 1
+        if keys[game_state.get_key_for_action('up')] and not game_state.prev_keys[game_state.get_key_for_action('up')]:
+            game_state.player_y = max(0, game_state.player_y - 1)
+        if keys[game_state.get_key_for_action('down')] and not game_state.prev_keys[game_state.get_key_for_action('down')]:
+            game_state.player_y = min(GRID_SIZE - 1, game_state.player_y + 1)
+        if keys[game_state.get_key_for_action('left')] and not game_state.prev_keys[game_state.get_key_for_action('left')]:
+            game_state.player_x = max(0, game_state.player_x - 1)
+        if keys[game_state.get_key_for_action('right')] and not game_state.prev_keys[game_state.get_key_for_action('right')]:
+            game_state.player_x = min(GRID_SIZE - 1, game_state.player_x + 1)
         
         # Update previous key states
-        game_state.prev_keys[pygame.K_w] = keys[pygame.K_w]
-        game_state.prev_keys[pygame.K_s] = keys[pygame.K_s]
-        game_state.prev_keys[pygame.K_a] = keys[pygame.K_a]
-        game_state.prev_keys[pygame.K_d] = keys[pygame.K_d]
+        game_state.prev_keys[game_state.get_key_for_action('up')] = keys[game_state.get_key_for_action('up')]
+        game_state.prev_keys[game_state.get_key_for_action('down')] = keys[game_state.get_key_for_action('down')]
+        game_state.prev_keys[game_state.get_key_for_action('left')] = keys[game_state.get_key_for_action('left')]
+        game_state.prev_keys[game_state.get_key_for_action('right')] = keys[game_state.get_key_for_action('right')]
         
         # Check if player collects key
         if not game_state.has_key and game_state.player_x == game_state.key_x and game_state.player_y == game_state.key_y:
@@ -218,27 +269,66 @@ while running:
                 game_state.message_timer = 3000
                 game_state.next_level()
         
-        # Draw grid lines
+        # Draw floor tiles and grid
         for x in range(GRID_SIZE):
             for y in range(GRID_SIZE):
+                if floor_img:
+                    screen.blit(floor_img, (x * CELL_SIZE, y * CELL_SIZE))
                 pygame.draw.rect(screen, GRAY, 
                                (x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE), 1)
-        
+
+        # Draw wall and button in level 2
+        if game_state.current_level == 2:
+            wall_x = GRID_SIZE // 2  # Center wall position
+
+            # Draw button at its fixed position
+            screen.blit(button_img, (game_state.button_x * CELL_SIZE, game_state.button_y * CELL_SIZE))
+            
+            # Check if player is on button
+            if game_state.player_x == game_state.button_x and game_state.player_y == game_state.button_y:
+                if game_state.wall_active:
+                    game_state.wall_active = False
+                    game_state.show_message("The wall disappears!")
+                    game_state.message_timer = 2000
+            
+            # Draw wall if active
+            if game_state.wall_active:
+                # Draw vertical wall in center for entire height
+                for y in range(GRID_SIZE):  # Full height wall
+                    screen.blit(wall_img, (wall_x * CELL_SIZE, y * CELL_SIZE))
+                    
+                    # Block player movement through wall
+                    if game_state.player_x == wall_x and game_state.player_y == y:
+                        # Push player back to previous position
+                        if game_state.player_x > game_state.prev_player_x:
+                            game_state.player_x = game_state.prev_player_x
+                        else:
+                            game_state.player_x = game_state.prev_player_x
+
+        # Draw maze walls in level 3
+        elif game_state.current_level == 3:
+            # Draw all maze walls
+            for wall_x, wall_y in game_state.maze_walls:
+                screen.blit(wall_img, (wall_x * CELL_SIZE, wall_y * CELL_SIZE))
+                
+                # Block player movement through maze walls
+                if game_state.player_x == wall_x and game_state.player_y == wall_y:
+                    # Push player back to previous position
+                    game_state.player_x = game_state.prev_player_x
+                    game_state.player_y = game_state.prev_player_y
+                    game_state.show_message("You can't walk through walls!")
+                    game_state.message_timer = 1000
+
         # Draw chest if not opened
         if not game_state.chest_opened:
-            if chest_img:
-                screen.blit(chest_img, (game_state.chest_x * CELL_SIZE, game_state.chest_y * CELL_SIZE))
-            else:
-                chest_text = game_font.render('📦', True, BROWN)
-                screen.blit(chest_text, (game_state.chest_x * CELL_SIZE, game_state.chest_y * CELL_SIZE))
+            screen.blit(chest_img, (game_state.chest_x * CELL_SIZE, game_state.chest_y * CELL_SIZE))
         
         # Draw key if not collected
-        if not game_state.has_key and game_state.key_x >= 0:
-            if key_img:
-                screen.blit(key_img, (game_state.key_x * CELL_SIZE, game_state.key_y * CELL_SIZE))
-            else:
-                key_text = game_font.render('🔑', True, YELLOW)
-                screen.blit(key_text, (game_state.key_x * CELL_SIZE, game_state.key_y * CELL_SIZE))
+        if not game_state.has_key:
+            screen.blit(key_img, (game_state.key_x * CELL_SIZE, game_state.key_y * CELL_SIZE))
+        
+        # Draw door
+        screen.blit(door_img, (game_state.door_x * CELL_SIZE, game_state.door_y * CELL_SIZE))
         
         # Draw enemy if not defeated
         if game_state.enemy_x >= 0:
@@ -261,17 +351,13 @@ while running:
                     enemy_text = game_font.render('💧', True, BLUE)
                     screen.blit(enemy_text, (game_state.enemy_x * CELL_SIZE, game_state.enemy_y * CELL_SIZE))
         
-        # Draw door (only on levels 1 and 2)
-        if game_state.current_level < 3:
-            if door_img:
-                screen.blit(door_img, (game_state.door_x * CELL_SIZE, game_state.door_y * CELL_SIZE))
-            else:
-                door_text = game_font.render('🚪', True, BLUE)
-                screen.blit(door_text, (game_state.door_x * CELL_SIZE, game_state.door_y * CELL_SIZE))
-        
         # Draw player
-        player_img = game_state.custom_player_image if game_state.custom_player_image else player_img
-        screen.blit(player_img, (game_state.player_x * CELL_SIZE, game_state.player_y * CELL_SIZE))
+        player_img_to_use = game_state.custom_player_image if game_state.custom_player_image else player_img
+        screen.blit(player_img_to_use, (game_state.player_x * CELL_SIZE, game_state.player_y * CELL_SIZE))
+        
+        # Store previous position for wall collision
+        game_state.prev_player_x = game_state.player_x
+        game_state.prev_player_y = game_state.player_y
         
         # Draw inventory
         inventory_x = 10
@@ -318,13 +404,14 @@ while running:
         # Draw message if active
         if game_state.is_message_active():
             draw_message(screen, game_state.message, message_font)
-    else:
-        draw_game_over_screen(screen, game_state.victory, try_again_button, exit_button, floor_img, title_font, message_font)
     
     # Update display
     pygame.display.flip()
     
-    # Control game speed
+    # Check sound status
+    game_state.check_sound_status()
+    
+    # Control frame rate
     clock.tick(60)
 
 # Quit game
